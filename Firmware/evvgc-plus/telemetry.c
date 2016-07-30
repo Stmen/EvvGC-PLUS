@@ -14,16 +14,15 @@
     limitations under the License.
 */
 
-#include "ch.h"
 #include "hal.h"
 
 #include "mpu6050.h"
 #include "pwmio.h"
-#include "eeprom.h"
 #include "misc.h"
 #include "attitude.h"
 #include "usbcfg.h"
 #include "telemetry.h"
+#include "storage.h"
 
 /* C libraries: */
 #include <string.h>
@@ -61,13 +60,15 @@ typedef struct tagMessage {
 /* Board status variable. */
 extern uint32_t g_boardStatus;
 /* Main thread termination flag. */
-extern bool_t g_runMain;
+extern bool g_runMain;
 /* I2C error info structure. */
 extern I2CErrorStruct g_i2cErrorInfo;
 /* Stream data id. */
 extern uint8_t g_streamDataID;
 /* Data streaming index. */
 extern uint8_t g_streamIdx;
+/* Led B request */
+extern bool led_b;
 /* Console input/output handle. */
 BaseChannel *g_chnp = NULL;
 
@@ -209,8 +210,8 @@ static void telemetryProcessCommand(const PMessage pMsg) {
     pMsg->size = sizeof(g_boardStatus) + TELEMETRY_MSG_SVC_SIZE;
     pMsg->crc  = telemetryGetCRC32Checksum(pMsg);
     break;
-  case 'c': /* Saves settings to EEPROM; */
-    if (eepromSaveSettings()) {
+  case 'c': /* Saves settings to FLASH; */
+    if (saveSettings()==SUCCESS) {
       telemetryPositiveResponse(pMsg);
     } else {
       telemetryNegativeResponse(pMsg);
@@ -359,15 +360,17 @@ static void telemetryReadSerialDataResync(uint8_t len) {
  * @return none.
  */
 void telemetryReadSerialData(void) {
-  chSysLock();
+  osalSysLock();
   /* The following function must be called from within a system lock zone. */
-  size_t bytesAvailable = chnBytesAvailable(g_chnp);
-  chSysUnlock();
+  size_t bytesAvailable = chIQGetFullI(&((SerialDriver *)g_chnp)->iqueue);
+  osalSysUnlock();
+  led_b = false;
 
   while (bytesAvailable) {
     if (bytesAvailable >= bytesRequired) {
       if (bytesRequired > 0) {
-        palTogglePad(GPIOA, GPIOA_LED_B);
+//        palTogglePad(GPIOA, GPIOA_LED_B);
+        led_b = true;
         chnRead(g_chnp, msgPos, bytesRequired);
         msgPos += bytesRequired;
         bytesAvailable -= bytesRequired;
@@ -397,11 +400,16 @@ void telemetryReadSerialData(void) {
       if (msg.crc == telemetryGetCRC32Checksum(&msg)) {
         telemetryProcessCommand(&msg);
       } else {
-        uint8_t i;
-        for (i =0; i < 50; i++) {
-          palTogglePad(GPIOA, GPIOA_LED_B);
-          chThdSleepMilliseconds(US2ST(10500));
-        }
+//        uint8_t i;
+ //       for (i =0; i < 50; i++) {
+ //         palTogglePad(GPIOA, GPIOA_LED_B);
+ //         chThdSleepMilliseconds(10.5);
+ //       }
+
+          led_b = true;
+          chThdSleepMilliseconds(500);
+          led_b = false;
+
       }
 
       /* Read another packet...*/
